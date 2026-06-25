@@ -1,3 +1,10 @@
+/**
+ * @file useContractEvents.test.ts
+ * @description Unit tests for the useContractEvents hook.
+ * @package stellar-hooks
+ * @license MIT
+ */
+
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
 // ─── Mock React hooks ─────────────────────────────────────────────────────────
@@ -9,7 +16,8 @@ vi.mock("react", async () => {
     useCallback: (fn: unknown) => fn,
     useReducer: vi.fn(),
     useEffect: vi.fn(),
-    useRef: vi.fn().mockReturnValue({ current: null }),
+    useRef: vi.fn().mockReturnValue({ current: true }),
+    useRef: vi.fn((val) => ({ current: val })),
   };
 });
 
@@ -17,7 +25,16 @@ vi.mock("react", async () => {
 
 const mockGetEvents = vi.fn();
 
+vi.mock("@stellar/stellar-sdk/rpc", () => ({
+  Server: vi.fn().mockImplementation(() => ({
+    getEvents: mockGetEvents,
+  })),
+}));
+
 vi.mock("@stellar/stellar-sdk", () => ({
+  StrKey: {
+    isValidContract: vi.fn().mockReturnValue(true),
+  },
   rpc: {
     Server: vi.fn().mockImplementation(() => ({
       getEvents: mockGetEvents,
@@ -179,7 +196,7 @@ describe("useContractEvents", () => {
 
     await hook.refetch();
 
-    const call = mockGetEvents.mock.calls[0][0];
+    const call = mockGetEvents.mock.calls[0]![0];
     expect(call).not.toHaveProperty("startLedger");
   });
 });

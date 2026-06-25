@@ -1,3 +1,10 @@
+/**
+ * @file usePathPayment.ts
+ * @description Hook for finding and executing path payments on Stellar.
+ * @package stellar-hooks
+ * @license MIT
+ */
+
 import { useCallback } from "react";
 import {
   Asset,
@@ -6,9 +13,11 @@ import {
   TransactionBuilder,
 } from "@stellar/stellar-sdk";
 import { useStellarContext } from "../context";
-import { useTransaction } from "./useTransaction";
+import { useTransactionCore } from "./useTransactionCore";
 import { useFreighter } from "./useFreighter";
 import type { TransactionStatus } from "../types";
+import { unsafeAsXdrString } from "../types";
+import { validatePublicKey } from "../utils";
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -46,8 +55,35 @@ export interface UsePathPaymentOptions {
   fee?: number;
   /** Polling timeout in seconds. Default: 60 */
   timeoutSeconds?: number;
+  /** Callback fired when the transaction is successfully confirmed. */
+  onSuccess?: (hash: string) => void;
+  /** Callback fired when the transaction fails or an error occurs. */
+  onError?: (error: Error) => void;
 }
 
+/**
+ * @example
+ * ```tsx
+ * // Strict send — send exactly 10 XLM, receive at least 9 USDC
+ * const {
+ *   submit,    // () => Promise<void>
+ *   status,    // "idle" | "submitting" | "polling" | "success" | "error"
+ *   hash,      // string | null
+ *   isLoading, // boolean
+ *   isSuccess, // boolean
+ *   isError,   // boolean
+ *   error,     // Error | null
+ *   reset,     // () => void
+ * } = usePathPayment({
+ *   mode: "strict-send",
+ *   sendAsset: { type: "native" },
+ *   sendAmount: "10",
+ *   destination: "GBXXX...",
+ *   destAsset: { type: "credit", code: "USDC", issuer: "GISSUER..." },
+ *   destMin: "9",
+ * });
+ * ```
+ */
 export interface UsePathPaymentReturn {
   submit: () => Promise<void>;
   status: TransactionStatus;
@@ -111,18 +147,31 @@ export function usePathPayment(
     path = [],
     fee = 100,
     timeoutSeconds = 60,
+    onSuccess,
+    onError,
   } = options;
+
+  const { submit: submitXdr, reset, ...txState } = useTransactionCore({
+    mode: "classic",
+    timeoutSeconds,
+    ...(onSuccess && { onSuccess }),
+    ...(onError && { onError }),
+  });
 
   const { config } = useStellarContext();
   const { signTransaction, publicKey } = useFreighter();
-  const { submit: submitXdr, reset, ...txState } = useTransaction({
-    mode: "classic",
-    timeoutSeconds,
-  });
 
   const submit = useCallback(async () => {
     if (!publicKey) {
       throw new Error("Freighter is not connected. Call connect() first.");
+    }
+
+    validatePublicKey(destination, "destination");
+    if (sendAsset.type === "credit") {
+      validatePublicKey(sendAsset.issuer, "sendAsset.issuer");
+    }
+    if (destAsset.type === "credit") {
+      validatePublicKey(destAsset.issuer, "destAsset.issuer");
     }
 
     // 1. Load source account
@@ -166,7 +215,7 @@ export function usePathPayment(
     const builtXdr = tx.toXDR();
 
     // 5. Sign via Freighter
-    const signedXdr = await signTransaction(builtXdr, {
+    const signedXdr = await signTransaction(unsafeAsXdrString(builtXdr), {
       networkPassphrase: config.networkPassphrase,
     });
 
